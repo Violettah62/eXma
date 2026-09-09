@@ -5,6 +5,8 @@ from rest_framework import status
 from rest_framework_simplejwt.tokens import RefreshToken
 from .permissions import IsAdministrator
 from .serializers import UserCreateSerializer
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 
 
 @api_view(['GET'])
@@ -18,6 +20,7 @@ def whoami(request):
         'department': user.department.name if user.department else None,
         'groups': list(user.groups.values_list('name', flat=True)),
         'is_superuser': user.is_superuser,
+        'must_change_password': user.must_change_password,
     })
 
 @api_view(['POST'])
@@ -49,7 +52,29 @@ def create_user(request):
     if serializer.is_valid():
         user = serializer.save()
         return Response(
-            {'id': user.id, 'email': user.email, 'detail': 'User created successfully.'},
+            {
+                'id': user.id,
+                'email': user.email,
+                'temporary_password': user._temp_password,
+                'detail': 'User created successfully. Share this temporary password with the employee through a secure channel — it will not be shown again.',
+            },
             status=status.HTTP_201_CREATED
         )
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def change_password(request):
+    new_password = request.data.get('new_password')
+    if not new_password:
+        return Response({'detail': 'new_password is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        validate_password(new_password, user=request.user)
+    except DjangoValidationError as e:
+        return Response({'detail': list(e.messages)}, status=status.HTTP_400_BAD_REQUEST)
+
+    request.user.set_password(new_password)
+    request.user.must_change_password = False
+    request.user.save()
+    return Response({'detail': 'Password changed successfully.'})
