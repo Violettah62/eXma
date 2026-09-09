@@ -3,6 +3,9 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework_simplejwt.tokens import RefreshToken
+from .permissions import IsAdministrator
+from .serializers import UserCreateSerializer
+
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -38,3 +41,15 @@ def logout(request):
             {'detail': 'Invalid or expired token.'},
             status=status.HTTP_400_BAD_REQUEST
         )
+
+@api_view(['POST'])
+@permission_classes([IsAdministrator])
+def create_user(request):
+    serializer = UserCreateSerializer(data=request.data)
+    if serializer.is_valid():
+        user = serializer.save()
+        return Response(
+            {'id': user.id, 'email': user.email, 'detail': 'User created successfully.'},
+            status=status.HTTP_201_CREATED
+        )
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
