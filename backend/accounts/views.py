@@ -1,12 +1,15 @@
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
+
+from rest_framework import status, viewsets
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from rest_framework import status
 from rest_framework_simplejwt.tokens import RefreshToken
+
+from .models import CustomUser, Department
 from .permissions import IsAdministrator
-from .serializers import UserCreateSerializer
-from django.contrib.auth.password_validation import validate_password
-from django.core.exceptions import ValidationError as DjangoValidationError
+from .serializers import UserCreateSerializer, UserSerializer, DepartmentSerializer
 
 
 @api_view(['GET'])
@@ -23,33 +26,49 @@ def whoami(request):
         'must_change_password': user.must_change_password,
     })
 
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def logout(request):
     try:
         refresh_token = request.data.get('refresh')
         if not refresh_token:
-            return Response(
-                {'detail': 'Refresh token is required.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({'detail': 'Refresh token is required.'}, status=status.HTTP_400_BAD_REQUEST)
         token = RefreshToken(refresh_token)
         token.blacklist()
-        return Response(
-            {'detail': 'Successfully logged out.'},
-            status=status.HTTP_205_RESET_CONTENT
-        )
+        return Response({'detail': 'Successfully logged out.'}, status=status.HTTP_205_RESET_CONTENT)
     except Exception:
-        return Response(
-            {'detail': 'Invalid or expired token.'},
-            status=status.HTTP_400_BAD_REQUEST
-        )
+        return Response({'detail': 'Invalid or expired token.'}, status=status.HTTP_400_BAD_REQUEST)
+
 
 @api_view(['POST'])
-@permission_classes([IsAdministrator])
-def create_user(request):
-    serializer = UserCreateSerializer(data=request.data)
-    if serializer.is_valid():
+@permission_classes([IsAuthenticated])
+def change_password(request):
+    new_password = request.data.get('new_password')
+    if not new_password:
+        return Response({'detail': 'new_password is required.'}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        validate_password(new_password, user=request.user)
+    except DjangoValidationError as e:
+        return Response({'detail': list(e.messages)}, status=status.HTTP_400_BAD_REQUEST)
+    request.user.set_password(new_password)
+    request.user.must_change_password = False
+    request.user.save()
+    return Response({'detail': 'Password changed successfully.'})
+
+
+class UserViewSet(viewsets.ModelViewSet):
+    queryset = CustomUser.objects.all()
+    permission_classes = [IsAdministrator]
+
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return UserCreateSerializer
+        return UserSerializer
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
         user = serializer.save()
         return Response(
             {
@@ -60,21 +79,18 @@ def create_user(request):
             },
             status=status.HTTP_201_CREATED
         )
-    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-def change_password(request):
-    new_password = request.data.get('new_password')
-    if not new_password:
-        return Response({'detail': 'new_password is required.'}, status=status.HTTP_400_BAD_REQUEST)
+    def perform_destroy(self, instance):
+        """'Delete' means deactivate — inactive users cannot authenticate, but their records (and audit trail) are preserved."""
+        instance.is_active = False
+        instance.save(update_fields=['is_active'])
 
-    try:
-        validate_password(new_password, user=request.user)
-    except DjangoValidationError as e:
-        return Response({'detail': list(e.messages)}, status=status.HTTP_400_BAD_REQUEST)
 
-    request.user.set_password(new_password)
-    request.user.must_change_password = False
-    request.user.save()
-    return Response({'detail': 'Password changed successfully.'})
+class DepartmentViewSet(viewsets.ModelViewSet):
+    queryset = Department.objects.all()
+    serializer_class = DepartmentSerializer
+
+    def get_permissions(self):
+        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+            return [IsAdministrator()]
+        return [IsAuthenticated()]
