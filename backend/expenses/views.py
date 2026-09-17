@@ -3,8 +3,9 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-
-from accounts.permissions import IsAdministrator
+from django.db import models
+from accounts.permissions import IsAdministrator, IsManager, IsManagerOfEmployee
+from approvals.models import Approval
 from .models import ExpenseCategory, Expense
 from .serializers import ExpenseCategorySerializer, ExpenseSerializer
 
@@ -29,15 +30,19 @@ class ExpenseViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        """
-        Employees only ever see their own expenses. (Managers/Finance/
-        Auditors get broader visibility, but that's built in later
-        phases alongside their approval/reporting features.)
-        """
         user = self.request.user
         if user.is_superuser:
             return Expense.objects.filter(is_deleted=False)
-        return Expense.objects.filter(employee=user, is_deleted=False)
+
+        base = Expense.objects.filter(is_deleted=False)
+
+        if user.groups.filter(name='Manager').exists() and hasattr(user, 'managed_departments'):
+            managed_dept_ids = user.managed_departments.values_list('id', flat=True)
+            return base.filter(
+                models.Q(employee=user) | models.Q(employee__department_id__in=managed_dept_ids)
+            )
+
+        return base.filter(employee=user)
 
     def perform_destroy(self, instance):
         """Soft delete: never actually remove the row, per audit requirements."""
@@ -65,4 +70,63 @@ class ExpenseViewSet(viewsets.ModelViewSet):
         expense.status = Expense.Status.PENDING
         expense.submitted_at = timezone.now()
         expense.save(update_fields=['status', 'submitted_at'])
+        return Response(ExpenseSerializer(expense).data)
+
+    @action(detail=True, methods=['post'], permission_classes=[IsManager])
+    def approve(self, request, pk=None):
+        expense = self.get_object()
+
+        if not IsManagerOfEmployee().has_object_permission(request, self, expense):
+            return Response(
+                {'detail': 'You do not manage this employee\'s department.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        if expense.status != Expense.Status.PENDING:
+            return Response(
+                {'detail': f'Cannot approve an expense with status "{expense.status}". Only pending expenses can be approved.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        Approval.objects.create(
+            expense=expense,
+            reviewer=request.user,
+            decision=Approval.Decision.APPROVED,
+            comment=request.data.get('comment', ''),
+        )
+        expense.status = Expense.Status.APPROVED
+        expense.save(update_fields=['status'])
+        return Response(ExpenseSerializer(expense).data)
+
+    @action(detail=True, methods=['post'], permission_classes=[IsManager])
+    def reject(self, request, pk=None):
+        expense = self.get_object()
+
+        if not IsManagerOfEmployee().has_object_permission(request, self, expense):
+            return Response(
+                {'detail': 'You do not manage this employee\'s department.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        if expense.status != Expense.Status.PENDING:
+            return Response(
+                {'detail': f'Cannot reject an expense with status "{expense.status}". Only pending expenses can be rejected.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        comment = request.data.get('comment', '')
+        if not comment.strip():
+            return Response(
+                {'detail': 'A comment explaining the rejection is required.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        Approval.objects.create(
+            expense=expense,
+            reviewer=request.user,
+            decision=Approval.Decision.REJECTED,
+            comment=comment,
+        )
+        expense.status = Expense.Status.REJECTED
+        expense.save(update_fields=['status'])
         return Response(ExpenseSerializer(expense).data)

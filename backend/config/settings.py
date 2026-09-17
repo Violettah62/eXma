@@ -46,6 +46,7 @@ INSTALLED_APPS = [
     'corsheaders',
     'accounts',
     'expenses',
+    'approvals',
     'rest_framework_simplejwt.token_blacklist',
 ]
 

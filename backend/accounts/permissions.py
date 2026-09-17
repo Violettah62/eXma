@@ -48,17 +48,18 @@ class IsAuditor(BasePermission):
 class IsManagerOfEmployee(BasePermission):
     """
     Object-level permission: grants access only if request.user manages
-    the department that a given employee (obj) belongs to.
+    the department of the employee associated with a given object.
 
-    Use this alongside IsManager on views where a Manager acts on a
-    SPECIFIC employee or their data (e.g. approving one person's expense),
-    not just "is this user a Manager in general."
+    Works against any object that either IS a CustomUser, or HAS an
+    'employee' attribute pointing to one (e.g. an Expense instance).
     """
 
     def has_object_permission(self, request, view, obj):
         if request.user.is_superuser:
             return True
-        employee_department = getattr(obj, 'department', None)
+
+        employee = getattr(obj, 'employee', obj)
+        employee_department = getattr(employee, 'department', None)
         if employee_department is None:
             return False
         return employee_department.manager_id == request.user.id
