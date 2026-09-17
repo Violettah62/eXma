@@ -4,7 +4,7 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from django.db import models
-from accounts.permissions import IsAdministrator, IsManager, IsManagerOfEmployee
+from accounts.permissions import IsAdministrator, IsManager, IsManagerOfEmployee, IsFinanceOfficer
 from approvals.models import Approval
 from .models import ExpenseCategory, Expense
 from .serializers import ExpenseCategorySerializer, ExpenseSerializer
@@ -40,6 +40,11 @@ class ExpenseViewSet(viewsets.ModelViewSet):
             managed_dept_ids = user.managed_departments.values_list('id', flat=True)
             return base.filter(
                 models.Q(employee=user) | models.Q(employee__department_id__in=managed_dept_ids)
+            )
+            
+        if user.groups.filter(name='Finance Officer').exists():
+            return base.filter(
+                models.Q(employee=user) | models.Q(status__in=[Expense.Status.APPROVED, Expense.Status.PAID])
             )
 
         return base.filter(employee=user)
@@ -128,5 +133,19 @@ class ExpenseViewSet(viewsets.ModelViewSet):
             comment=comment,
         )
         expense.status = Expense.Status.REJECTED
+        expense.save(update_fields=['status'])
+        return Response(ExpenseSerializer(expense).data)
+    
+    @action(detail=True, methods=['post'], permission_classes=[IsFinanceOfficer])
+    def mark_paid(self, request, pk=None):
+        expense = self.get_object()
+
+        if expense.status != Expense.Status.APPROVED:
+            return Response(
+                {'detail': f'Cannot mark an expense with status "{expense.status}" as paid. Only approved expenses can be marked paid.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        expense.status = Expense.Status.PAID
         expense.save(update_fields=['status'])
         return Response(ExpenseSerializer(expense).data)
