@@ -6,7 +6,9 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.views import TokenObtainPairView
 
+from audit.services import log_action
 from .models import CustomUser, Department
 from .permissions import IsAdministrator
 from .serializers import UserCreateSerializer, UserSerializer, DepartmentSerializer
@@ -94,3 +96,15 @@ class DepartmentViewSet(viewsets.ModelViewSet):
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
             return [IsAdministrator()]
         return [IsAuthenticated()]
+    
+class LoggingTokenObtainPairView(TokenObtainPairView):
+    def post(self, request, *args, **kwargs):
+        response = super().post(request, *args, **kwargs)
+        if response.status_code == 200:
+            email = request.data.get('email', '')
+            try:
+                user = CustomUser.objects.get(email=email)
+                log_action(request, 'login', 'CustomUser', user.id, f'{email} logged in.', user=user)
+            except CustomUser.DoesNotExist:
+                pass
+        return response

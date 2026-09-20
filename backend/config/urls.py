@@ -2,7 +2,8 @@ from django.contrib import admin
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from reports.views import expense_summary_report, category_report, department_report
-from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+from rest_framework_simplejwt.views import TokenRefreshView
+from accounts.views import LoggingTokenObtainPairView
 
 from accounts.views import whoami, logout, change_password, UserViewSet, DepartmentViewSet
 from expenses.views import ExpenseCategoryViewSet, ExpenseViewSet
@@ -15,7 +16,7 @@ router.register(r'departments', DepartmentViewSet, basename='department')
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
+    path('api/token/', LoggingTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('api/whoami/', whoami, name='whoami'),
     path('api/logout/', logout, name='logout'),
