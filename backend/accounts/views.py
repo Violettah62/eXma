@@ -72,6 +72,10 @@ class UserViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
+        log_action(
+            request, 'user_created', 'CustomUser', user.id,
+            f'{request.user.email} created user {user.email}.'
+        )
         return Response(
             {
                 'id': user.id,
@@ -80,6 +84,22 @@ class UserViewSet(viewsets.ModelViewSet):
                 'detail': 'User created successfully. Share this temporary password with the employee through a secure channel — it will not be shown again.',
             },
             status=status.HTTP_201_CREATED
+        )
+
+    def perform_update(self, serializer):
+        instance = serializer.save()
+        log_action(
+            self.request, 'user_updated', 'CustomUser', instance.id,
+            f'{self.request.user.email} updated user {instance.email}.'
+        )
+
+    def perform_destroy(self, instance):
+        """'Delete' means deactivate — inactive users cannot authenticate, but their records (and audit trail) are preserved."""
+        instance.is_active = False
+        instance.save(update_fields=['is_active'])
+        log_action(
+            self.request, 'user_deactivated', 'CustomUser', instance.id,
+            f'{self.request.user.email} deactivated user {instance.email}.'
         )
 
     def perform_destroy(self, instance):
