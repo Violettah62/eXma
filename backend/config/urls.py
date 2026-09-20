@@ -1,6 +1,7 @@
 from django.contrib import admin
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
+from reports.views import expense_summary_report, category_report, department_report
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from accounts.views import whoami, logout, change_password, UserViewSet, DepartmentViewSet
@@ -20,6 +21,9 @@ urlpatterns = [
     path('api/logout/', logout, name='logout'),
     path('api/change-password/', change_password, name='change_password'),
     path('api/', include(router.urls)),
+    path('api/reports/summary/', expense_summary_report, name='expense_summary_report'),
+    path('api/reports/by-category/', category_report, name='category_report'),
+    path('api/reports/by-department/', department_report, name='department_report'),
 ]
 
 from django.conf import settings
