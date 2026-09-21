@@ -6,6 +6,7 @@ from rest_framework.response import Response
 from django.db import models
 from accounts.permissions import IsAdministrator, IsManager, IsManagerOfEmployee, IsFinanceOfficer
 from approvals.models import Approval
+from audit.services import log_action
 from .models import ExpenseCategory, Expense
 from .serializers import ExpenseCategorySerializer, ExpenseSerializer
 
@@ -41,7 +42,7 @@ class ExpenseViewSet(viewsets.ModelViewSet):
             return base.filter(
                 models.Q(employee=user) | models.Q(employee__department_id__in=managed_dept_ids)
             )
-            
+
         if user.groups.filter(name='Finance Officer').exists():
             return base.filter(
                 models.Q(employee=user) | models.Q(status__in=[Expense.Status.APPROVED, Expense.Status.PAID])
@@ -49,10 +50,21 @@ class ExpenseViewSet(viewsets.ModelViewSet):
 
         return base.filter(employee=user)
 
+    def perform_create(self, serializer):
+        expense = serializer.save()
+        log_action(
+            self.request, 'expense_created', 'Expense', expense.id,
+            f'{self.request.user.email} created expense #{expense.id} ({expense.amount}).'
+        )
+
     def perform_destroy(self, instance):
         """Soft delete: never actually remove the row, per audit requirements."""
         instance.is_deleted = True
         instance.save(update_fields=['is_deleted'])
+        log_action(
+            self.request, 'expense_deleted', 'Expense', instance.id,
+            f'{self.request.user.email} deleted expense #{instance.id}.'
+        )
 
     def update(self, request, *args, **kwargs):
         """Only draft expenses can be edited — once submitted, it's locked."""
@@ -62,7 +74,12 @@ class ExpenseViewSet(viewsets.ModelViewSet):
                 {'detail': 'Only draft expenses can be edited.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        return super().update(request, *args, **kwargs)
+        response = super().update(request, *args, **kwargs)
+        log_action(
+            request, 'expense_updated', 'Expense', instance.id,
+            f'{request.user.email} updated expense #{instance.id}.'
+        )
+        return response
 
     @action(detail=True, methods=['post'])
     def submit(self, request, pk=None):
@@ -75,6 +92,10 @@ class ExpenseViewSet(viewsets.ModelViewSet):
         expense.status = Expense.Status.PENDING
         expense.submitted_at = timezone.now()
         expense.save(update_fields=['status', 'submitted_at'])
+        log_action(
+            request, 'expense_submitted', 'Expense', expense.id,
+            f'{request.user.email} submitted expense #{expense.id}.'
+        )
         return Response(ExpenseSerializer(expense).data)
 
     @action(detail=True, methods=['post'], permission_classes=[IsManager])
@@ -101,6 +122,10 @@ class ExpenseViewSet(viewsets.ModelViewSet):
         )
         expense.status = Expense.Status.APPROVED
         expense.save(update_fields=['status'])
+        log_action(
+            request, 'expense_approved', 'Expense', expense.id,
+            f'{request.user.email} approved expense #{expense.id}.'
+        )
         return Response(ExpenseSerializer(expense).data)
 
     @action(detail=True, methods=['post'], permission_classes=[IsManager])
@@ -134,8 +159,12 @@ class ExpenseViewSet(viewsets.ModelViewSet):
         )
         expense.status = Expense.Status.REJECTED
         expense.save(update_fields=['status'])
+        log_action(
+            request, 'expense_rejected', 'Expense', expense.id,
+            f'{request.user.email} rejected expense #{expense.id}: {comment}'
+        )
         return Response(ExpenseSerializer(expense).data)
-    
+
     @action(detail=True, methods=['post'], permission_classes=[IsFinanceOfficer])
     def mark_paid(self, request, pk=None):
         expense = self.get_object()
@@ -148,4 +177,8 @@ class ExpenseViewSet(viewsets.ModelViewSet):
 
         expense.status = Expense.Status.PAID
         expense.save(update_fields=['status'])
+        log_action(
+            request, 'expense_marked_paid', 'Expense', expense.id,
+            f'{request.user.email} marked expense #{expense.id} as paid.'
+        )
         return Response(ExpenseSerializer(expense).data)
