@@ -4,6 +4,7 @@ from rest_framework.routers import DefaultRouter
 from reports.views import expense_summary_report, category_report, department_report
 from rest_framework_simplejwt.views import TokenRefreshView
 from accounts.views import LoggingTokenObtainPairView
+from audit.views import AuditLogViewSet
 
 from accounts.views import whoami, logout, change_password, UserViewSet, DepartmentViewSet
 from expenses.views import ExpenseCategoryViewSet, ExpenseViewSet
@@ -13,6 +14,7 @@ router.register(r'categories', ExpenseCategoryViewSet, basename='category')
 router.register(r'expenses', ExpenseViewSet, basename='expense')
 router.register(r'users', UserViewSet, basename='user')
 router.register(r'departments', DepartmentViewSet, basename='department')
+router.register(r'audit-logs', AuditLogViewSet, basename='auditlog')
 
 urlpatterns = [
     path('admin/', admin.site.urls),
