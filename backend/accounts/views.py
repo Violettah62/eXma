@@ -102,10 +102,6 @@ class UserViewSet(viewsets.ModelViewSet):
             f'{self.request.user.email} deactivated user {instance.email}.'
         )
 
-    def perform_destroy(self, instance):
-        """'Delete' means deactivate — inactive users cannot authenticate, but their records (and audit trail) are preserved."""
-        instance.is_active = False
-        instance.save(update_fields=['is_active'])
 
 
 class DepartmentViewSet(viewsets.ModelViewSet):
