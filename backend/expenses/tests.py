@@ -61,13 +61,17 @@ class RBACTests(ExpenseTestBase):
         expense.refresh_from_db()
         self.assertEqual(expense.status, Expense.Status.PAID)
 
+    def test_auditor_can_view_any_expense(self):
+        expense = self.create_expense(self.other_employee, status_value=Expense.Status.DRAFT)
+        self.login_as(self.auditor)
+        response = self.client.get(reverse('expense-detail', args=[expense.id]))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
     def test_auditor_cannot_modify_expense(self):
         expense = self.create_expense(self.employee, status_value=Expense.Status.DRAFT)
         self.login_as(self.auditor)
         response = self.client.patch(reverse('expense-detail', args=[expense.id]), {'amount': '999.00'})
-        self.assertIn(response.status_code, [status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND])
-
-
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 class ObjectLevelTests(ExpenseTestBase):
 
     def test_employee_cannot_access_other_employees_expense(self):

@@ -3,6 +3,7 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.exceptions import PermissionDenied
 from django.db import models
 from accounts.permissions import IsAdministrator, IsManager, IsManagerOfEmployee, IsFinanceOfficer
 from approvals.models import Approval
@@ -47,6 +48,10 @@ class ExpenseViewSet(viewsets.ModelViewSet):
             return base.filter(
                 models.Q(employee=user) | models.Q(status__in=[Expense.Status.APPROVED, Expense.Status.PAID])
             )
+            
+        if user.groups.filter(name='Auditor').exists():
+            return base
+
 
         return base.filter(employee=user)
 
@@ -58,17 +63,23 @@ class ExpenseViewSet(viewsets.ModelViewSet):
         )
 
     def perform_destroy(self, instance):
-        """Soft delete: never actually remove the row, per audit requirements."""
+        """Soft delete: only the owning employee can delete their own expense."""
+        if instance.employee_id != self.request.user.id and not self.request.user.is_superuser:
+            raise PermissionDenied('You can only delete your own expenses.')
         instance.is_deleted = True
         instance.save(update_fields=['is_deleted'])
         log_action(
             self.request, 'expense_deleted', 'Expense', instance.id,
             f'{self.request.user.email} deleted expense #{instance.id}.'
         )
-
     def update(self, request, *args, **kwargs):
-        """Only draft expenses can be edited — once submitted, it's locked."""
+        """Only the owning employee can edit their own expense, and only while it's still a draft."""
         instance = self.get_object()
+        if instance.employee_id != request.user.id and not request.user.is_superuser:
+            return Response(
+                {'detail': 'You can only edit your own expenses.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
         if instance.status != Expense.Status.DRAFT:
             return Response(
                 {'detail': 'Only draft expenses can be edited.'},
